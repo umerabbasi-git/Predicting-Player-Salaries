@@ -1,0 +1,506 @@
+---
+title: "Study on NBA Player Salaries"
+author: "Umer Abbasi"
+date: "15/04/2022"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## EDA
+
+```{r}
+data <- read.csv('NBA Player Stats.csv', header = TRUE)
+data <- na.omit(data) # Removing Missing/NA Data
+
+# Adjusting the data frame to remove irrelevant variables for this study
+data <- data.frame(Name=data$Name, Salary=data$Salary, Age=data$Age, Experience=data$Experience, 
+                   FieldGoal_pct=data$FG., ThreePt_pct=data$X3P., FreeThrow_pct=data$FT., Rebounds=data$TRB, 
+                   Assists=data$AST, Steals=data$STL, Blocks=data$BLK, Turnovers=data$TOV, 
+                   Fouls=data$PF, Points=data$PTS)
+
+# Create a 50/50 split in the data
+set.seed(1)
+train <- data[sample(1:nrow(data), 93, replace=F), ]
+test <- data[which(!(data$Name %in% train$Name)),]
+```
+
+We will perform a quick EDA of our variables:
+```{r}
+# Histograms of the entire dataset
+par(mfrow=c(3,3))
+for(i in 2:14){
+  hist(data[,i], main=paste0("Histogram of ", names(data)[i]), xlab=names(data)[i])
+}
+
+# Boxplots of the entire dataset
+par(mfrow=c(3,3))
+for(i in 2:14){
+  boxplot(data[,i], main=paste0("Boxplot of ", names(data)[i]), xlab=names(data)[i], horizontal=T)
+}
+
+# QQ-Plots Response vs. predictors
+par(mfrow=c(3,4))
+for(i in 3:14){
+  qqplot(data[,i],data[,2], main=paste0("Salary vs. ", names(data)[i]), xlab=names(data)[i], ylab = "Salary $")
+}
+```
+From the histogram we notice how salary, the response variable, is highly right skewed as well as the predictor variables: experience, rebounds, and assists. The predictors three-point %, free-throw % are both left skewed with the rest approximately normally distributed. Box-plot reveals several outliers in our data with field-goal % and average blocks per game having the most outliers. QQ-plot shows most of our data is approximately normal, but three-point %, free-throw % looking problematic. If these are deemed problematic later on then a transformation will be applied accordingly.
+
+\newpage
+## Summary Statistics
+
+```{r}
+mtr <- apply(train[,-c(1)], 2, mean)
+sdtr <- apply(train[,-c(1)], 2, sd)
+
+mtest <- apply(test[,-c(1)], 2, mean)
+sdtest <- apply(test[,-c(1)], 2, sd)
+```
+
+We will observe the summary statistics in our training and test dataset:
+
+Variable | mean (s.d.) in training | mean (s.d.) in test
+---------|-------------------------|--------------------
+Salary | `r round(mtr[1], 3)` (`r round(sdtr[1], 3)`) | `r round(mtest[1], 3)` (`r round(sdtest[1], 3)`)
+`r names(test)[3]` | `r round(mtr[2],3)` (`r round(sdtr[2],3)`) | `r round(mtest[2],3)` (`r round(sdtest[2],3)`)
+`r names(test)[4]` | `r round(mtr[3],3)` (`r round(sdtr[3],3)`) | `r round(mtest[3],3)` (`r round(sdtest[3],3)`)
+Field Goal % | `r round(mtr[4],3)` (`r round(sdtr[4],3)`) | `r round(mtest[4],3)` (`r round(sdtest[4],3)`)
+3-Pt. % | `r round(mtr[5],3)` (`r round(sdtr[5],3)`) | `r round(mtest[5],3)` (`r round(sdtest[5],3)`)
+Free-throw % | `r round(mtr[6],3)` (`r round(sdtr[6],3)`) | `r round(mtest[6],3)` (`r round(sdtest[6],3)`)
+`r names(test)[8]` | `r round(mtr[7],3)` (`r round(sdtr[7],3)`) | `r round(mtest[7],3)` (`r round(sdtest[7],3)`)
+`r names(test)[9]` | `r round(mtr[8],3)` (`r round(sdtr[8],3)`) | `r round(mtest[8],3)` (`r round(sdtest[8],3)`)
+`r names(test)[10]` | `r round(mtr[9],3)` (`r round(sdtr[9],3)`) | `r round(mtest[9],3)` (`r round(sdtest[9],3)`)
+`r names(test)[11]` | `r round(mtr[10],3)` (`r round(sdtr[10],3)`) | `r round(mtest[10],3)` (`r round(sdtest[10],3)`)
+`r names(test)[12]` | `r round(mtr[11],3)` (`r round(sdtr[11],3)`) | `r round(mtest[11],3)` (`r round(sdtest[11],3)`)
+`r names(test)[13]` | `r round(mtr[12],3)` (`r round(sdtr[12],3)`) | `r round(mtest[12],3)` (`r round(sdtest[12],3)`)
+`r names(test)[14]` | `r round(mtr[13],3)` (`r round(sdtr[13],3)`) | `r round(mtest[13],3)` (`r round(sdtest[13],3)`)
+
+Table: Summary statistics in training and test dataset, each of size 93.
+
+
+## Building a Model
+
+With this dataset it's more efficient to build a model with all the variables and then reducing it where appropriate to achieve a best model, so we build this full model and check for model assumption and condition violations:
+
+```{r}
+full <- lm(Salary ~ ., data=train[,-c(1)])
+summary(full)
+
+# checking conditions
+pairs(train[,-c(1,2)]) # Condition 2 Satisfied
+plot(train$Salary ~ fitted(full), main="Y vs Fitted", xlab="Fitted", ylab="Salary") # Condition 1 Satisfied
+lines(lowess(train$Salary ~ fitted(full)), lty=2)
+abline(a = 0, b = 1)
+```
+
+Pairwise plots show no patterns that would be alarming, so condition 2 for using linear model is satisfied. Condition 1 is satisfied because the plot of Y vs. Fitted (or y hat) follows a random scatter around the identity function (the diagonal) and a simple function is present. Since the conditions are satisfied we proceed to checking the assumptions for any model violations:
+
+```{r, fig.width=6, fig.height=6}
+# checking model assumptions
+par(mfrow=c(4,4))
+plot(rstandard(full)~fitted(full), xlab="fitted", ylab="Residuals")
+for(i in c(3:14)){
+  plot(rstandard(full)~train[,i], xlab=names(train)[i], ylab="Residuals")
+}
+qqnorm(rstandard(full)) # Normality Satisfied
+qqline(rstandard(full))
+```
+Residual vs. Fitted plot shows an obvious fanning pattern which could be an issue with constant variance for the response variable, salary, and would likely require a transformation to fix.  Residual vs. predictor plots shows a clear non-linear pattern for the points variable, and a minor upward curving for the assists variable which both could indicate a linearity violation. Normal QQ-Plot shows no issues with normality.
+
+I will use the Box-cox and the Power Transform function to determine if we should transform the response and predictor variables. The result seems to indicate that we should consider a transformation on both the response and the predictors:
+
+```{r}
+## Adding 0.5 to variables with lots of 0s; Modifying data to another variable
+trainTMP <- train
+trainTMP$ThreePt_pct <- trainTMP$ThreePt_pct+0.5 #B/C contained 0's
+trainTMP$Experience <- trainTMP$Experience+0.5 #B/C contained 0's
+
+library(car)
+p <- powerTransform(cbind(trainTMP[,-c(1)]))
+summary(p)
+```
+
+So let's apply the transformations
+
+```{r}
+# so transform the response and predictors in both the training and test set
+train$logSalary <- log(train$Salary) #2
+train$sqrtExperience <- sqrt(train$Experience) #4
+train$logRebounds <- log(train$Rebounds) #8
+train$logAssists <- log(train$Assists) #9
+train$logTurnovers <- log(train$Turnovers) #12
+train$logFouls <- log(train$Fouls) #13
+train$sqrtPoints <- sqrt(train$Points) #14
+
+test$logSalary <- log(test$Salary) #2
+test$sqrtExperience <- sqrt(test$Experience) #4
+test$logRebounds <- log(test$Rebounds) #8
+test$logAssists <- log(test$Assists) #9
+test$logTurnovers <- log(test$Turnovers) #12
+test$logFouls <- log(test$Fouls) #13
+test$sqrtPoints <- sqrt(test$Points) #14
+```
+
+Re-checking the model condition and assumptions after applying the transformations:
+```{r}
+full2 <- lm(logSalary ~ ., data=train[,-c(1,2,4,8,9,12,13,14)])
+summary(full2)
+# Check Conditions
+pairs(train[,-c(1,2,4,8,9,12,13,14,15)]) # Condition 2 Satisfied
+plot(train$logSalary ~ fitted(full2), main="Y vs Fitted", xlab="Fitted", ylab="(log)Salary") # Condition 1 Satisfied
+lines(lowess(train$logSalary ~ fitted(full2)), lty=2)
+abline(a = 0, b = 1)
+
+# Check Assumptions
+par(mfrow=c(3,3))
+plot(rstandard(full2)~fitted(full2), xlab="fitted", ylab="Residuals")
+for(i in c(3,5,6,7,10,11,16:21)){
+  plot(rstandard(full2)~train[,i], xlab=names(train)[i], ylab="Residuals")
+}
+qqnorm(rstandard(full2))  # Normality Satisfied
+qqline(rstandard(full2))
+```
+**Multicollinearity (VIF)**
+
+Now we would look for multicollinearity in our model:
+```{r}
+vif(full2)
+```
+The result indicates an issue with severe multicollinearity (VIF>5) for the following variables in order of severity: Turnovers, Age, Experience, and Assists.
+
+We would like to build a model without multicollinearity, so we can remove all or part of the problematic variables.
+
+```{r}
+# A potential model without multicollinearity (Remove all problematic predictors w/ VIF>5) 
+# Remove turnovers, age, experience, assists
+ temp1 <- lm(logSalary ~ ., data=train[,-c(1,2,4,8,9,12,13,14,19,3,16,18)])
+ vif(temp1)
+
+# Another model without multicollinearity (Removing two problematic predictors)
+# Remove turnovers and age
+ temp2 <- lm(logSalary ~ ., data=train[,-c(1,2,4,8,9,12,13,14,19,3)])
+ vif(temp2)
+
+# Another model without multicollinearity (Removing two problematic predictors)
+# Remove age and assists
+  temp3 <- lm(logSalary ~ ., data=train[,-c(1,2,4,8,9,12,13,14,3,18)])
+  vif(temp3)
+```
+I noticed the VIF of the first output, with turnovers, age, experience, and assists, removed gives a model with the least amount of VIF. The second output with turnovers and age removed gives a model with a reduced VIF better than the third model with age and assists removed. But I would like to proceed with all three models.
+
+Since we made adjustments to our model we would like to re-check our model conditions and assumptions:
+```{r}
+# Decide to go with Models temp1 and temp2
+# re-checking conditions and assumptions on both models
+
+## temp1
+# Check Conditions
+pairs(train[,-c(1,2,4,8,9,12,13,14,19,3,16,18)]) # Condition 2 Satisfied
+plot(train$logSalary ~ fitted(temp1), main="Y vs Fitted", xlab="Fitted", ylab="(log)Salary") # Condition 1 Satisfied
+lines(lowess(train$logSalary ~ fitted(temp1)), lty=2)
+abline(a = 0, b = 1)
+# Check Assumptions
+par(mfrow=c(3,4))
+plot(rstandard(temp1)~fitted(temp1), xlab="fitted", ylab="Residuals")
+for(i in c(5,6,7,10,11,17,20,21)){
+  plot(rstandard(temp1)~train[,i], xlab=names(train)[i], ylab="Residuals")
+}
+qqnorm(rstandard(temp1))  # Normality Satisfied
+qqline(rstandard(temp1))
+
+## temp2
+# Check Conditions
+pairs(train[,-c(1,2,4,8,9,12,13,14,19,3)]) # Condition 2 Satisfied
+par(mfrow=c(1,1))
+plot(train$logSalary ~ fitted(temp2), main="Y vs Fitted", xlab="Fitted", ylab="(log)Salary") # Condition 1 Satisfied
+lines(lowess(train$logSalary ~ fitted(temp2)), lty=2)
+abline(a = 0, b = 1)
+# Check Assumptions
+par(mfrow=c(3,4))
+plot(rstandard(temp2)~fitted(temp2), xlab="fitted", ylab="Residuals")
+for(i in c(5,6,7,10,11,16:18,20,21)){
+  plot(rstandard(temp2)~train[,i], xlab=names(train)[i], ylab="Residuals")
+}
+qqnorm(rstandard(temp2))  # Normality Satisfied
+qqline(rstandard(temp2))
+
+## temp3
+# Check Conditions
+pairs(train[,-c(1,2,4,8,9,12,13,14,18,3)]) # Condition 2 Satisfied
+par(mfrow=c(1,1))
+plot(train$logSalary ~ fitted(temp3), main="Y vs Fitted", xlab="Fitted", ylab="(log)Salary") # Condition 1 Satisfied
+lines(lowess(train$logSalary ~ fitted(temp3)), lty=2)
+abline(a = 0, b = 1)
+# Check Assumptions
+par(mfrow=c(3,4))
+plot(rstandard(temp3)~fitted(temp3), xlab="fitted", ylab="Residuals")
+for(i in c(5,6,7,10,11,16,17,19,20,21)){
+  plot(rstandard(temp3)~train[,i], xlab=names(train)[i], ylab="Residuals")
+}
+qqnorm(rstandard(temp3))  # Normality Satisfied
+qqline(rstandard(temp3))
+```
+Both the conditions and model assumptions hold for the first, second model, and third model so we can proceed to using statistical summaries, t-test, and identifying influential points, outliers, etc. to further pick the best model for this study.
+
+\newpage
+## Model Summary
+
+For each of these model, we now fit them in our test dataset, and then build a table to summarize the differences between the training models and test models.
+
+```{r, echo=F}
+# for temp1
+# first with training then with test set
+p1 <- length(coef(temp1))-1
+n1 <- nrow(train)
+vif1 <- max(vif(temp1))
+D1 <- length(which(cooks.distance(temp1) > qf(0.5, p1+1, n1-p1-1)))
+fits1 <- length(which(abs(dffits(temp1)) > 2*sqrt((p1+1)/n1)))
+betas1 <- length(which(abs(dfbetas(temp1)) > 2/sqrt(n1)))
+l1 <- length(which(hatvalues(temp1) > 2*((p1+1)/n1))) # Leverage Points
+o1 <- length(which(rstandard(temp1) < -2))+length(which(rstandard(temp1) > 2)) # Outliers
+
+coefs1 <- round(summary(temp1)$coefficients[,1], 3)
+ses1 <- 2*round(summary(temp1)$coefficients[,2], 3)
+
+r1 <- round(summary(temp1)$r.squared, 3)
+r1adj <- round(summary(temp1)$adj.r.squared, 3)
+aic1 <- AIC(temp1) 
+aicc1 <- aic1 + (2*(p1+2)*(p1+3)/(n1-p1-1))
+bic1 <- BIC(temp1)
+
+# fit in test dataset
+temp1test <- lm(logSalary ~ ., data=test[,-c(1,2,4,8,9,12,13,14,19,3,16,18)])
+
+tp1 <- length(coef(temp1test))-1
+tn1 <- nrow(test)
+tvif1 <- max(vif(temp1test))
+tD1 <- length(which(cooks.distance(temp1test) > qf(0.5, tp1+1, tn1-tp1-1)))
+tfits1 <- length(which(abs(dffits(temp1test)) > 2*sqrt((tp1+1)/tn1)))
+tbetas1 <- length(which(abs(dfbetas(temp1test)) > 2/sqrt(tn1)))
+tl1 <- length(which(hatvalues(temp1test) > 2*((tp1+1)/tn1))) # Leverage Points
+to1 <- length(which(rstandard(temp1test) < -2))+length(which(rstandard(temp1test) > 2)) # Outliers
+
+tcoefs1 <- round(summary(temp1test)$coefficients[,1], 3)
+tses1 <- 2*round(summary(temp1test)$coefficients[,2], 3)
+
+tr1 <- round(summary(temp1test)$r.squared, 3)
+tr1adj <- round(summary(temp1test)$adj.r.squared, 3)
+taic1 <- AIC(temp1test) 
+taicc1 <- taic1 + (2*(tp1+2)*(tp1+3)/(tn1-tp1-1))
+tbic1 <- BIC(temp1test)
+
+# for temp2
+# first with training then with test set
+p2 <- length(coef(temp2))-1
+n2 <- nrow(train)
+vif2 <- max(vif(temp2))
+D2 <- length(which(cooks.distance(temp2) > qf(0.5, p2+1, n2-p2-1)))
+fits2 <- length(which(abs(dffits(temp2)) > 2*sqrt((p2+1)/n2)))
+betas2 <- length(which(abs(dfbetas(temp2)) > 2/sqrt(n2)))
+l2 <- length(which(hatvalues(temp2) > 2*((p2+1)/n2))) # Leverage Points
+o2 <- length(which(rstandard(temp2) < -2))+length(which(rstandard(temp2) > 2)) # Outliers
+
+coefs2 <- round(summary(temp2)$coefficients[,1], 3)
+ses2 <- 2*round(summary(temp2)$coefficients[,2], 3)
+
+r2 <- round(summary(temp2)$r.squared, 3)
+r2adj <- round(summary(temp2)$adj.r.squared, 3)
+aic2 <- AIC(temp2)
+aicc2 <- aic2 + (2*(p2+2)*(p2+3)/(n2-p2-1))
+bic2 <- BIC(temp2)
+
+# fit in test dataset
+temp2test <- lm(logSalary ~ ., data=test[,-c(1,2,4,8,9,12,13,14,19,3)])
+
+tp2 <- length(coef(temp2test))-1
+tn2 <- nrow(test)
+tvif2 <- max(vif(temp2test))
+tD2 <- length(which(cooks.distance(temp2test) > qf(0.5, tp2+1, tn2-tp2-1)))
+tfits2 <- length(which(abs(dffits(temp2test)) > 2*sqrt((tp2+1)/tn2)))
+tbetas2 <- length(which(abs(dfbetas(temp2test)) > 2/sqrt(tn2)))
+tl2 <- length(which(hatvalues(temp2test) > 2*((tp2+1)/tn2))) # Leverage Points
+to2 <- length(which(rstandard(temp2test) < -2))+length(which(rstandard(temp2test) > 2)) # Outliers
+
+tcoefs2 <- round(summary(temp2test)$coefficients[,1], 3)
+tses2 <- 2*round(summary(temp2test)$coefficients[,2], 3)
+
+tr2 <- round(summary(temp2test)$r.squared, 3)
+tr2adj <- round(summary(temp2test)$adj.r.squared, 3)
+taic2 <- AIC(temp2test)
+taicc2 <- taic2 + (2*(tp2+2)*(tp2+3)/(tn2-tp2-1))
+tbic2 <- BIC(temp2test)
+
+# for temp3
+# first with training then with test set
+p3 <- length(coef(temp3))-1
+n3 <- nrow(train)
+vif3 <- max(vif(temp3))
+D3 <- length(which(cooks.distance(temp3) > qf(0.5, p3+1, n3-p3-1)))
+fits3 <- length(which(abs(dffits(temp3)) > 2*sqrt((p3+1)/n3)))
+betas3 <- length(which(abs(dfbetas(temp3)) > 2/sqrt(n3)))
+l3 <- length(which(hatvalues(temp3) > 2*((p3+1)/n3))) # Leverage Points
+o3 <- length(which(rstandard(temp3) < -2))+length(which(rstandard(temp3) > 2)) # Outliers
+
+coefs3 <- round(summary(temp3)$coefficients[,1], 3)
+ses3 <- 2*round(summary(temp3)$coefficients[,2], 3)
+
+r3 <- round(summary(temp3)$r.squared, 3)
+r3adj <- round(summary(temp3)$adj.r.squared, 3)
+aic3 <- AIC(temp3)
+aicc3 <- aic3 + (2*(p3+2)*(p3+3)/(n3-p3-1))
+bic3 <- BIC(temp3)
+
+# fit in test dataset
+temp3test <- lm(logSalary ~ ., data=test[,-c(1,2,4,8,9,12,13,14,18,3)])
+
+tp3 <- length(coef(temp3test))-1
+tn3 <- nrow(test)
+tvif3 <- max(vif(temp3test))
+tD3 <- length(which(cooks.distance(temp3test) > qf(0.5, tp3+1, tn3-tp3-1)))
+tfits3 <- length(which(abs(dffits(temp3test)) > 2*sqrt((tp3+1)/tn3)))
+tbetas3 <- length(which(abs(dfbetas(temp3test)) > 2/sqrt(tn3)))
+tl3 <- length(which(hatvalues(temp3test) > 2*((tp3+1)/tn3))) # Leverage Points
+to3 <- length(which(rstandard(temp3test) < -2))+length(which(rstandard(temp3test) > 2)) # Outliers
+
+tcoefs3 <- round(summary(temp3test)$coefficients[,1], 3)
+tses3 <- 2*round(summary(temp3test)$coefficients[,2], 3)
+
+tr3 <- round(summary(temp3test)$r.squared, 3)
+tr3adj <- round(summary(temp3test)$adj.r.squared, 3)
+taic3 <- AIC(temp3test)
+taicc3 <- taic3 + (2*(tp3+2)*(tp3+3)/(tn3-tp3-1))
+tbic3 <- BIC(temp3test)
+```
+
+```{r echo=FALSE}
+# for temp1, check condition and assumptions for both training and test set
+# first with training then with test set
+pairs(train[,-c(1,2,4,8,9,12,13,14,19,3,16,18)])
+par(mfrow=c(1,1))
+plot(train$logSalary ~ fitted(temp1), main="Y vs Fitted", xlab="Fitted", ylab="(log)Salary")
+lines(lowess(train$logSalary ~ fitted(temp1)), lty=2)
+abline(a = 0, b = 1)
+# Check Assumptions
+par(mfrow=c(3,4))
+plot(rstandard(temp1)~fitted(temp1), xlab="fitted", ylab="Residuals")
+for(i in c(5,6,7,10,11,17,20,21)){
+  plot(rstandard(temp1)~train[,i], xlab=names(train)[i], ylab="Residuals")
+}
+qqnorm(rstandard(temp1))
+qqline(rstandard(temp1))
+# test set
+pairs(test[,-c(1,2,4,8,9,12,13,14,19,3,16,18)])
+par(mfrow=c(1,1))
+plot(test$logSalary ~ fitted(temp1test), main="Y vs Fitted", xlab="Fitted", ylab="(log)Salary")
+lines(lowess(test$logSalary ~ fitted(temp1test)), lty=2)
+abline(a = 0, b = 1)
+# Check Assumptions
+par(mfrow=c(3,4))
+plot(rstandard(temp1test)~fitted(temp1test), xlab="fitted", ylab="Residuals")
+for(i in c(5,6,7,10,11,17,20,21)){
+  plot(rstandard(temp1test)~test[,i], xlab=names(test)[i], ylab="Residuals")
+}
+qqnorm(rstandard(temp1test))
+qqline(rstandard(temp1test))
+
+
+# for temp2, check condition and assumptions for both training and test set
+# first with training then with test set
+pairs(train[,-c(1,2,4,8,9,12,13,14,19,3)])
+par(mfrow=c(1,1))
+plot(train$logSalary ~ fitted(temp2), main="Y vs Fitted", xlab="Fitted", ylab="(log)Salary")
+lines(lowess(train$logSalary ~ fitted(temp2)), lty=2)
+abline(a = 0, b = 1)
+# Check Assumptions
+par(mfrow=c(3,4))
+plot(rstandard(temp2)~fitted(temp2), xlab="fitted", ylab="Residuals")
+for(i in c(5,6,7,10,11,16:18,20,21)){
+  plot(rstandard(temp2)~train[,i], xlab=names(train)[i], ylab="Residuals")
+}
+qqnorm(rstandard(temp2))
+qqline(rstandard(temp2))
+# test set
+pairs(test[,-c(1,2,4,8,9,12,13,14,19,3)])
+par(mfrow=c(1,1))
+plot(test$logSalary ~ fitted(temp2test), main="Y vs Fitted", xlab="Fitted", ylab="(log)Salary")
+lines(lowess(test$logSalary ~ fitted(temp2test)), lty=2)
+abline(a = 0, b = 1)
+# Check Assumptions
+par(mfrow=c(3,4))
+plot(rstandard(temp2test)~fitted(temp2test), xlab="fitted", ylab="Residuals")
+for(i in c(5,6,7,10,11,16:18,20,21)){
+  plot(rstandard(temp2test)~test[,i], xlab=names(test)[i], ylab="Residuals")
+}
+qqnorm(rstandard(temp2test))
+qqline(rstandard(temp2test))
+
+
+
+# for temp3, check condition and assumptions for both training and test set
+# first with training then with test set
+pairs(train[,-c(1,2,4,8,9,12,13,14,18,3)])
+par(mfrow=c(1,1))
+plot(train$logSalary ~ fitted(temp3), main="Y vs Fitted", xlab="Fitted", ylab="(log)Salary")
+lines(lowess(train$logSalary ~ fitted(temp3)), lty=2)
+abline(a = 0, b = 1)
+# Check Assumptions
+par(mfrow=c(3,4))
+plot(rstandard(temp2)~fitted(temp2), xlab="fitted", ylab="Residuals")
+for(i in c(5,6,7,10,11,16,17,19,20,21)){
+  plot(rstandard(temp3)~train[,i], xlab=names(train)[i], ylab="Residuals")
+}
+qqnorm(rstandard(temp3))
+qqline(rstandard(temp3))
+# test set
+pairs(test[,-c(1,2,4,8,9,12,13,14,18,3)])
+par(mfrow=c(1,1))
+plot(test$logSalary ~ fitted(temp3test), main="Y vs Fitted", xlab="Fitted", ylab="(log)Salary")
+lines(lowess(test$logSalary ~ fitted(temp3test)), lty=2)
+abline(a = 0, b = 1)
+# Check Assumptions
+par(mfrow=c(3,4))
+plot(rstandard(temp3test)~fitted(temp3test), xlab="fitted", ylab="Residuals")
+for(i in c(5,6,7,10,11,16,17,19,20,21)){
+  plot(rstandard(temp3test)~test[,i], xlab=names(test)[i], ylab="Residuals")
+}
+qqnorm(rstandard(temp3test))
+qqline(rstandard(temp3test))
+```
+
+\newpage
+
+Using the coded information (not shown in this document) we add to a table all the relevant components needed to validate the model. We can further use this table to select a final model.
+
+Characteristic | Model 1 (Train) | Model 1 (Test) | Model 2 (Train) | Model 2 (Test) | Model 3 (Train) | Model 3 (Test)
+---------------|----------------|---------------|-----------------|---------------|-----------------|---------------
+Largest VIF value | `r vif1` | `r tvif1` | `r vif2` | `r tvif2` | `r vif3` | `r tvif3`
+\# Cook's D | `r D1` | `r tD1` | `r D2` | `r tD2` | `r D3` | `r tD3`
+\# DFFITS | `r fits1` | `r tfits1` | `r fits2` | `r tfits2` | `r fits3` | `r tfits3`
+\# DFBETA | `r betas1` | `r tbetas1` | `r betas2` | `r tbetas2` | `r betas3` | `r tbetas3`
+\# Leverage Points | `r l1` | `r tl1` | `r l2` | `r tl2` | `r l3` | `r tl3`
+\# Outliers | `r o1` | `r to1` | `r o2` | `r to2` | `r o3` | `r to3`
+Violations | none | none | none | none | none | none
+R^2 | `r r1` | `r tr1` | `r r2` | `r tr2` | `r r3` | `r tr3`
+Adjusted R^2 | `r r1adj` | `r tr1adj` | `r r2adj` | `r tr2adj` | `r r3adj` | `r tr3adj`
+AICc | `r aicc1` | `r taicc1` | `r aicc2` | `r taicc2` | `r aicc3` | `r taicc3`
+BIC | `r bic1` | `r tbic1` | `r bic2` | `r tbic2` | `r bic3` | `r tbic3`
+---------------|----------------|---------------|-----------------|---------------|-----------------|---------------
+Intercept | `r coefs1[1]` $\pm$ `r ses1[1]` (\*) | `r tcoefs1[1]` $\pm$ `r tses1[1]` (\*)|`r coefs2[1]` $\pm$ `r ses2[1]` (\*) | `r tcoefs2[1]` $\pm$ `r tses2[1]` (\*) | `r coefs3[1]` $\pm$ `r ses3[1]`(\*) | `r tcoefs3[1]` $\pm$ `r tses3[1]`(\*)
+Field Goal %  | `r coefs1[2]` $\pm$ `r ses1[2]`  |`r tcoefs1[2]` $\pm$ `r tses1[2]` | `r coefs2[2]` $\pm$ `r ses2[2]`  | `r tcoefs2[2]` $\pm$ `r tses2[2]` | `r coefs3[2]` $\pm$ `r ses3[2]`  | `r tcoefs3[2]` $\pm$ `r tses3[2]`
+3-Pt %  | `r coefs1[3]` $\pm$ `r ses1[3]` |`r tcoefs1[3]` $\pm$ `r tses1[3]` | `r coefs2[3]` $\pm$ `r ses2[3]`  | `r tcoefs2[3]` $\pm$ `r tses2[3]` | `r coefs3[3]` $\pm$ `r ses3[3]`  | `r tcoefs3[3]` $\pm$ `r tses3[3]`
+Free-throw %  | `r coefs1[4]` $\pm$ `r ses1[4]` | `r tcoefs1[4]` $\pm$ `r tses1[4]`| `r coefs2[4]` $\pm$ `r ses2[4]` | `r tcoefs2[4]` $\pm$ `r tses2[4]` | `r coefs3[4]` $\pm$ `r ses3[4]` | `r tcoefs3[4]` $\pm$ `r tses3[4]`
+Steals  | `r coefs1[5]` $\pm$ `r ses1[5]`|`r tcoefs1[5]` $\pm$ `r tses1[5]`| `r coefs2[5]` $\pm$ `r ses2[5]`  | `r tcoefs2[5]` $\pm$ `r tses2[5]` | `r coefs3[5]` $\pm$ `r ses3[5]`  | `r tcoefs3[5]` $\pm$ `r tses3[5]`
+Blocks  | `r coefs1[6]` $\pm$ `r ses1[6]` |`r tcoefs1[6]` $\pm$ `r tses1[6]` | `r coefs2[6]` $\pm$ `r ses2[6]`   | `r tcoefs2[6]` $\pm$ `r tses2[6]` | `r coefs3[6]` $\pm$ `r ses3[6]`   | `r tcoefs3[6]` $\pm$ `r tses3[6]`
+Experience  | - | - | `r coefs2[7]` $\pm$ `r ses2[7]` (\*)| `r tcoefs2[7]` $\pm$ `r tses2[7]` (\*) | `r coefs3[7]` $\pm$ `r ses3[7]` (\*)| `r tcoefs3[7]` $\pm$ `r tses3[7]` (\*)
+Rebounds  | `r coefs1[7]` $\pm$ `r ses1[7]` |`r tcoefs1[7]` $\pm$ `r tses1[7]` (\*)|  `r coefs2[8]` $\pm$ `r ses2[8]`  | `r tcoefs2[8]` $\pm$ `r tses2[8]` (\*) |  `r coefs3[8]` $\pm$ `r ses3[8]`  | `r tcoefs3[8]` $\pm$ `r tses3[8]` (\*)
+Assists  | - | - | `r coefs2[9]` $\pm$ `r ses2[9]` | `r tcoefs2[9]` $\pm$ `r tses2[9]` | - | - |
+Turnovers | - | - | - | - | `r coefs3[9]` $\pm$ `r ses3[9]` | `r tcoefs3[9]` $\pm$ `r tses3[9]` 
+Fouls  | `r coefs1[8]` $\pm$ `r ses1[8]` |`r tcoefs1[8]` $\pm$ `r tses1[8]` | `r coefs2[10]` $\pm$ `r ses2[10]`   | `r tcoefs2[10]` $\pm$ `r tses2[10]` | `r coefs3[10]` $\pm$ `r ses3[10]`   | `r tcoefs3[10]` $\pm$ `r tses3[10]`
+Points per Game  | `r coefs1[9]` $\pm$ `r ses1[9]` (\*)|`r tcoefs1[9]` $\pm$ `r tses1[9]` (\*)| `r coefs2[11]` $\pm$ `r ses2[11]` (\*) | `r tcoefs2[11]` $\pm$ `r tses2[11]` (\*) | `r coefs3[11]` $\pm$ `r ses3[11]` (\*) | `r tcoefs3[11]` $\pm$ `r tses3[11]` (\*)
+
+Table: Summary of characteristics of three candidate models in the training and test datasets. Model 1 uses Field Goal %, Three-point %, Free throw %, Steals, Blocks, Rebounds, Fouls, and Points per game as predictors, while Model 2 uses all predictors from Model 1 but adds Experience and Assists into its model, Model 3 add Experience and Turnovers to Model 1. Response is log(Salary) in all three models.  Coefficients are presented as estimate $\pm$ 2SE (\* = significant t-test at $\alpha = 0.05$).
